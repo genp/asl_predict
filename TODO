@@ -1,0 +1,8 @@
+
+- update caffe
+- load sequence to sequence model
+- get opencv and ffmpeg libs
+- extract frames
+- exatract frame features
+- train classifier...
+- get asl video labels

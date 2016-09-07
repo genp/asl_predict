@@ -1,0 +1,16 @@
+brew update
+brew upgrade
+# OpenCV and ffmpeg should now be installed
+export PYTHONPATH=$PYTHONPATH:/usr/local/Cellar/opencv/2.4.13/lib/python2.7/site-packages/
+
+Install caffe:
+git clone
+copy makefile.config
+make all
+make test
+make runtest
+make pycaffe
+# export path to caffe Ex: export PYTHONPATH=$PYTHONPATH:/Users/gen/caffe/python
+
+
+
