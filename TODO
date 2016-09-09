@@ -1,7 +1,5 @@
-
-- reduce dim of VGG features
 - synthesize positives
-- print some annecdotal predictions for qualitative comparison
+- print some annecdotal predictions for qualitative comparison -- still not sure if predictions are junk
 - load sequence to sequence model
 - train classifier on lstm
 

@@ -39,7 +39,7 @@ else:
 
     # Save all features
     vid_feats_dict = dict(zip(os.listdir(vid_dir), vid_feats))
-    joblib.dump(vid_feats, vid_feats_file, compress=6)
+    joblib.dump(vid_feats_dict, vid_feats_file, compress=6)
 
 # Read in labels
 student_file = 'data/datamatrixFull.tsv'
@@ -66,7 +66,7 @@ read_lbls(student_file, student_lbls)
 read_lbls(exp_file, exp_lbls)    
 
 
-def reduce(codes, ops, output_dim):
+def reduce(codes, ops, output_dim=100):
     '''
     "codes" should be a numpy array of codes for either a single or multiple images of shape:
     (N, c) where "N" is the number of images and "c" is the length of codes.  
@@ -114,7 +114,7 @@ slice = []
 odim = 4096
 rdim = 200
 for c in range(5):
-    slice = slice + [c*odim:c*odim+range(rdim)]
+    slice = slice + range(c*odim,c*odim+rdim)
 student_attrs, student_Y = zip(*sorted(student_lbls.items(), key=lambda s: s[0].lower()))
 student_Y = np.array(student_Y)
 student_feats = []
@@ -134,9 +134,10 @@ exp_Y = reduce(exp_Y, ['normalize'])#np.divide(exp_Y, np.max(exp_Y))
 print 'Exp dataset: Y {} X {}'.format(exp_Y.shape, exp_feats.shape)
 
 # Fit train - 1vs.Rest of concattenated mean pooled features
-num_train = 50
+num_train = 60
+binary_thresh = 0.2
 X = np.array(student_feats[:num_train])
-Y = binarize(student_Y[:num_train, :], threshold=0.1)
+Y = binarize(student_Y[:num_train, :], threshold=binary_thresh)
 
 classif = OneVsRestClassifier(SVC(kernel='linear',probability = True))
 classif.fit(X, Y)
@@ -152,22 +153,21 @@ print 'Student Train: Accuracy {} AP {} chance {}'.format(np.mean(scores),
                                                           chance)
 
 # Test
-Yt = binarize(student_Y[num_train:, :], threshold=0.1)
+Yt = binarize(student_Y[num_train:, :], threshold=binary_thresh)
 Xt = np.array(student_feats[num_train:])
 
 p = classif.predict(Xt)
 scores = [accuracy_score(Yt[:,i], p[:,i]) for i in range(Yt.shape[1])]
 ap = [average_precision_score(Yt[:,i], p[:,i]) for i in range(Yt.shape[1])]
 chance = np.mean(np.divide(np.sum(Yt,axis=0),Yt.shape[1]))
-print 'Student Train: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
+print 'Student Test: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
                                                           np.mean([s for s in ap if not np.isnan(s)]),
                                                           chance)
 
 
 # Fit train - 1vs.Rest of concattenated mean pooled features
-num_train = 50
 X = np.array(exp_feats[:num_train])
-Y = binarize(exp_Y[:num_train, :], threshold=0.1)
+Y = binarize(exp_Y[:num_train, :], threshold=binary_thresh)
 
 classif = OneVsRestClassifier(SVC(kernel='linear'))
 classif.fit(X, Y)
@@ -181,13 +181,13 @@ print 'Exp Train: Accuracy {} AP {} chance {}'.format(np.mean(scores),
                                                           chance)
 
 # Test
-Yt = binarize(exp_Y[num_train:, :], threshold=0.1)
+Yt = binarize(exp_Y[num_train:, :], threshold=binary_thresh)
 Xt = np.array(exp_feats[num_train:])
 
 p = classif.predict(Xt)
 scores = [accuracy_score(Yt[:,i], p[:,i]) for i in range(Yt.shape[1])]
 ap = [average_precision_score(Yt[:,i], p[:,i]) for i in range(Yt.shape[1])]
 chance = np.mean(np.divide(np.sum(Yt,axis=0),Yt.shape[1]))
-print 'Exp Train: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
+print 'Exp Test: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
                                                           np.mean([s for s in ap if not np.isnan(s)]),
                                                           chance)
