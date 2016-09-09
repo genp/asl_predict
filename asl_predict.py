@@ -1,23 +1,90 @@
 #!/usr/bin/env python
+import copy
+import re
+import tempfile
+
+import cv2
 import numpy as np
 
 
-class Video:
-    def __init__(self):
-        pass
+class Video():
+    ''' This is the object that holds a video file and contains
+    methods for processing that file and predicting its contents. 
+    '''
+    def __init__(self, fname):
+        self.vidcap = cv2.VideoCapture(fname)
+        self.fname = fname
+        self.w = self.vidcap.get(cv2.cv.CV_CAP_PROP_FRAME_WIDTH)
+        self.h = self.vidcap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
+        self.fps = round(self.vidcap.get(cv2.cv.CV_CAP_PROP_FPS))
+        self.num_frames = self.vidcap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
+        self.frames = []
+        print self
+        
+    def __repr__(self):
+        return ("Video from {}: "
+               "(Width, Height, FPS, Number of Frames) "
+               "({}, {}, {}, {})").format(self.fname, 
+                                          self.w, self.h, 
+                                          self.fps, self.num_frames)
+
     def get_frames(self):
+        if self.frames:
+            return self.frames
+
+        self.vidcap.set(cv2.cv.CV_CAP_PROP_POS_MSEC, 0.0)
+        count = 0
+        success = 1
+        while success:
+          success,image = self.vidcap.read()
+          if not success:
+              break
+          self.frames.append(Frame(image))
+          count += 1
+          if count % 5 == 0:
+              print 'Read {} of {} frames'.format(count, 
+                                                  self.num_frames)
+        print 'Done reading {} frames'.format(self.num_frames)
+        
+    def write_frames(self, write_dir):
+        if not self.frames:
+            self.get_frames()
+        for frame in self.frames:
+            cv2.imwrite(os.path.join(write_dir, 
+                                     'frame_{}.jpg'.format(count)), 
+                        frame.image)
+
+    def extract_frame_features(self, feature, mean_pool_length=0):
+        frame_feats = [copy.deepcopy(x.extract_feature(feature)) for x in self.frames]
+        if mean_pool_length > 0:
+            frame_feats = mean_pool(frame_feats, mean_pool_length)
+        return frame_feats
+
+    def predict(self):
         pass
-    def pool(self):
+
+class Frame():
+    def __init__(self, image):
+        self.image = image
+
+    def extract_feature(self, feature):
+        return feature.extract(self.image)
+
+class Estimator():
+    def train(self):
         pass
     def predict(self):
         pass
 
-class Frame:
-    def __init__(self):
-        pass
-    def predict(self):
-        pass
+class MultiNet:
+   def __init__(self, single, many):
+       self.single = single
+       self.many = many
 
+class CNN_Model:
+   def __init__(self, net, xform):
+       self.net = net
+       self.xform = xform
 
 class CNN():
 
@@ -29,12 +96,10 @@ class CNN():
         if not key in CNN.CACHE.keys():
             self.populate_cache(key)
         self.single = CNN.CACHE[key].single
-        self.many = CNN.CACHE[key].many
 
     def del_networks(self):
         CNN.CACHE = {}
         self.single = None
-        self.many = None
 
     def cache_key(self):
         key = str(self.params)
@@ -54,23 +119,19 @@ class CNN():
                 caffe.set_mode_gpu()
         temp = tempfile.NamedTemporaryFile(delete = False)
 
-        def_path = "caffemodels/" + self.model +"/train.prototxt"
-        weight_path = "caffemodels/" + self.model + "/weights.caffemodel"
         #go through and edit batch size
-        arch = open(def_path,'r').readlines()
+        arch = open(self.model_def,'r').readlines()
         for i in range(len(arch)):
             if "batch_size" in arch[i]:
                 arch[i] = re.sub('\d+',str(batch_size),arch[i])
         temp.writelines(arch)
         temp.close()
 
-        net = caffe.Net(str(temp.name), str(weight_path), caffe.TEST)
+        net = caffe.Net(str(temp.name), caffe.TEST, weights=self.model_weights)
         xform = caffe.io.Transformer({'data': net.blobs['data'].data.shape})
         xform.set_transpose('data', self.transpose)
         xform.set_channel_swap('data',self.channel_swap)
         
-        # TODO delete temp file
-
         return CNN_Model(net, xform)
 
 
@@ -79,8 +140,9 @@ class CNN():
         '''
         Parameters
         ------------
-        "model" is the folder name where the model specs and weights live. 
-        ie model = "VGG", "GoogleNet", "BVLC_Reference_Caffenet"
+        "model_def" is the prototxt file name where the model is defined.
+        "model_weights" is the caffemodel file with the weight values for the pre-trained model. 
+        ie models such as "VGG", "BVLC_Reference_Caffenet"
         
         "layer_name" is the layer name used for extraction 
         ie layer_name = "fc7" (for VGG)
@@ -94,11 +156,12 @@ class CNN():
 
         '''
 
-        ReducibleFeature.set_params(self, **kwargs)        
-        self.model = kwargs.get('model', "caffenet")
+        self.model_def = kwargs.get('model_def', "")
+        self.model_weights = kwargs.get('model_weights', "")
         self.layer_name = kwargs.get('layer_name', "fc7")
         self.transpose = kwargs.get('transpose', (2,0,1))
         self.channel_swap = kwargs.get('channel_swap', (2,1,0))
+        self.params = kwargs    
 
 
     #assume that we're getting a single image
@@ -115,35 +178,17 @@ class CNN():
         feat = self.single.net.blobs[self.layer_name].data[...].reshape(-1)
         feat = np.reshape(feat, (-1))
         return feat
-    
-    def extract_many(self, imgs):
-        '''
-        imgs is a list of app.models.Patch.image, which are ndarrays of shape (x,y,3)
-        '''
-        self.get_networks()
 
-        if len(imgs) > CNN.MANY_BATCH_SIZE:
-            print 'exceeded max batch size. splitting into {} minibatches'.format(int(len(imgs)/CNN.MANY_BATCH_SIZE)+1)
-            codes = np.asarray([])
-            for i in range(int(len(imgs)/CNN.MANY_BATCH_SIZE)+1):
-                tim = imgs[i*CNN.MANY_BATCH_SIZE:min(len(imgs),(i+1)*CNN.MANY_BATCH_SIZE)]
-                tim = np.array([self.many.xform.preprocess('data',i) for i in tim])
-                num_imgs = len(tim)
-                if num_imgs < CNN.MANY_BATCH_SIZE:
-                    tim = np.vstack((tim, np.zeros(np.append(CNN.MANY_BATCH_SIZE-num_imgs,self.many.net.blobs['data'].data.shape[1:]),dtype=np.float32)))                 
-                self.many.net.set_input_arrays(tim, np.ones(CNN.MANY_BATCH_SIZE,dtype=np.float32))
-                p = self.many.net.forward()
-                codes = np.append(codes,self.many.net.blobs[self.layer_name].data[...])
-            codes = codes.reshape(np.append(-1,self.many.net.blobs[self.layer_name].data.shape[1:]))
-            codes = codes[:len(imgs), :]
-        else:
-            tim = np.array([self.many.xform.preprocess('data',i) for i in imgs])
-            num_imgs = len(tim)
-            if num_imgs < CNN.MANY_BATCH_SIZE:
-                tim = np.vstack((tim, np.zeros(np.append(CNN.MANY_BATCH_SIZE-num_imgs,self.many.net.blobs['data'].data.shape[1:]),dtype=np.float32)))
-            self.many.net.set_input_arrays(tim, np.ones(tim.shape[0],dtype=np.float32))
-            p = self.many.net.forward()
-            codes = self.many.net.blobs[self.layer_name].data[...]
-            if num_imgs < CNN.MANY_BATCH_SIZE:
-                codes = codes[:num_imgs,:]
-        return codes
+
+def mean_pool(feats, output_length):
+    step = np.true_divide(len(feats),output_length)
+    pool_feats = []
+    cur_pos = 0.0
+    while cur_pos < len(feats):
+        # average the frames in this group
+        pool_feats.append(np.mean(np.array(feats[int(cur_pos):min(len(feats), int(cur_pos+step))]), axis=0))
+        cur_pos = cur_pos+step
+    return pool_feats
+
+def flatten(feats):
+    return np.reshape(np.array(feats), (-1))

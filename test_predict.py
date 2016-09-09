@@ -8,28 +8,26 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import binarize
 from sklearn.metrics import average_precision_score, accuracy_score
 
-# v = Video('data/videos/mp4/accident.mp4')
-# v.get_frames()
-feature = CNN()
-feature.set_params(model_def='/Users/gen/kaizen/caffemodels/VGG/train.prototxt', 
-                   model_weights='/Users/gen/kaizen/caffemodels/VGG/weights.caffemodel', 
-                   layer_name='fc7')
-# frame_feats = v.extract_frame_features(feature)
-# pool_feats = v.extract_frame_features(feature, mean_pool_length=10)
-# flat_feat = flatten(pool_feats)
-
-# TODO: loading the lstm is not working
-# lstm = CNN()
-# lstm.set_params(model_def='/Users/gen/asl_predict/models/naacl15_vgg/poolmean.prototxt', 
-#                    model_weights='/Users/gen/asl_predict/models/naacl15_vgg/naacl15_pool_vgg_fc7_mean_fac2.caffemodel', 
-#                    layer_name='lstm2')
-
-# Load all features
 vid_feats_file = 'data/features/vgg_meanpool_5_flat.jbl'
 if os.path.exists(vid_feats_file):
     vid_feats_dict = joblib.load(vid_feats_file)
-    # vid_feats = zip(*sorted(vid_feats_dict.items(), key=lambda s: s[0].lower()))[1]
+
 else:
+    feature = CNN()
+    feature.set_params(model_def='/Users/gen/kaizen/caffemodels/VGG/train.prototxt', 
+                       model_weights='/Users/gen/kaizen/caffemodels/VGG/weights.caffemodel', 
+                       layer_name='fc7')
+    # frame_feats = v.extract_frame_features(feature)
+    # pool_feats = v.extract_frame_features(feature, mean_pool_length=10)
+    # flat_feat = flatten(pool_feats)
+
+    # TODO: loading the lstm is not working
+    # lstm = CNN()
+    # lstm.set_params(model_def='/Users/gen/asl_predict/models/naacl15_vgg/poolmean.prototxt', 
+    #                    model_weights='/Users/gen/asl_predict/models/naacl15_vgg/naacl15_pool_vgg_fc7_mean_fac2.caffemodel', 
+    #                    layer_name='lstm2')
+
+    # Load all features
     vid_dir = 'data/videos/mp4'
     vid_feats = []
     for fname in os.listdir(vid_dir):
@@ -67,22 +65,72 @@ def read_lbls(fname, lbls):
 read_lbls(student_file, student_lbls)    
 read_lbls(exp_file, exp_lbls)    
 
+
+def reduce(codes, ops, output_dim):
+    '''
+    "codes" should be a numpy array of codes for either a single or multiple images of shape:
+    (N, c) where "N" is the number of images and "c" is the length of codes.  
+
+    "ops" indicates the processes to perform on the given feature.
+    Currently supported operations: subsample, normalization (normalize), power normalization (power_norm)
+
+    "output_dim" is the number of dimensions requested for output of a dimensionality reduction operation.
+    Not needed for non dimensionality reduction operations (ie "normalization")
+    
+    "alpha" is the power for the power normalization operation
+    '''
+    output_codes = codes if len(codes.shape) > 1 else codes.reshape(1,len(codes))
+
+    for op in ops:
+
+        if op == "subsample":
+            odim = output_dim
+            if odim <= output_codes.shape[1]:
+                output_codes = output_codes[:,0:odim]
+            else:
+                raise ValueError('output_dim is larger than the codes! ')
+        elif op == "normalize":
+            mean = np.mean(output_codes, 1)
+            std = np.std(output_codes, 1)
+            norm = np.divide((output_codes - mean[:, np.newaxis]),std[:, np.newaxis])
+            output_codes = norm
+
+        elif op == "power_norm":
+            alpha = 2.5
+            pownorm = lambda x: np.power(np.abs(x), alpha)
+            pw = pownorm(output_codes)
+            norm = np.linalg.norm(pw, axis=1)
+            if not np.any(norm):
+                warnings.warn("Power norm not evaluated due to 0 value norm")
+                continue
+            output_codes = np.divide(pw,norm[:, np.newaxis])
+            output_codes = np.nan_to_num(output_codes)
+
+    if output_codes.shape[0] == 1:
+        output_codes = np.reshape(output_codes, -1)
+    return output_codes
+
+slice = []
+odim = 4096
+rdim = 200
+for c in range(5):
+    slice = slice + [c*odim:c*odim+range(rdim)]
 student_attrs, student_Y = zip(*sorted(student_lbls.items(), key=lambda s: s[0].lower()))
 student_Y = np.array(student_Y)
 student_feats = []
 for attr in student_attrs:
-    student_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'])
-student_feats = np.array(student_feats)
-student_Y = np.divide(student_Y, np.max(student_Y))
+    student_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
+student_feats = reduce(np.array(student_feats), ['normalize', 'power_norm'])
+student_Y = reduce(student_Y, ['normalize'])#np.divide(student_Y, np.max(student_Y))
 print 'Student dataset: Y {} X {}'.format(student_Y.shape, student_feats.shape)
 
 exp_attrs, exp_Y = zip(*sorted(exp_lbls.items(), key=lambda s: s[0].lower()))
 exp_Y = np.array(exp_Y)
 exp_feats = []
 for attr in exp_attrs:
-    exp_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'])
-exp_feats = np.array(exp_feats)
-exp_Y = np.divide(exp_Y, np.max(exp_Y))
+    exp_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
+exp_feats = reduce(np.array(exp_feats), ['normalize', 'power_norm'])#np.array(exp_feats)
+exp_Y = reduce(exp_Y, ['normalize'])#np.divide(exp_Y, np.max(exp_Y))
 print 'Exp dataset: Y {} X {}'.format(exp_Y.shape, exp_feats.shape)
 
 # Fit train - 1vs.Rest of concattenated mean pooled features
