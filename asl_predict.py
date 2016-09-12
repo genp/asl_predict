@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+import os
 import copy
 import re
 import tempfile
@@ -39,59 +40,72 @@ class Video():
         the cropped and rotated frames flipped horizontally.
         '''
         
-        synth_meta = [str(args[:ind]) for ind in range(len(args))]
+        synth_meta = [str(args[:ind]) if ind > 1 else str(args[0]) for ind in range(1,len(args))]
         print 'Creating frames with these transfomations {}'.format(synth_meta)
         if all([sm in self.frames.keys() for sm in synth_meta]):
             return self.frames
 
         if 'orig' not in self.frames.keys():
             self.vidcap.set(cv2.cv.CV_CAP_PROP_POS_MSEC, 0.0)
-            orig_frames = []
+            self.frames['orig'] = []
             count = 0
             success = 1
             while success:
               success,image = self.vidcap.read()
               if not success:
                   break
-              orig_frams.append(Frame(image))
+              self.frames['orig'].append(Frame(image))
               count += 1
               if count % 5 == 0:
                   print 'Read {} of {} frames'.format(count, 
                                                       self.num_frames)
             print 'Done reading {} frames'.format(self.num_frames)
 
-        for ind in range(len(args)):
-            trans = args[:ind]
+        print args
+        for ind in range(1,len(args)+1):
+            trans = args[:ind] 
+            print 'Current Transform: {}'.format(trans)
             if str(trans) in self.frames.keys():
                 continue
-            tf_frames = transform_frames(self.frames['orig'], trans[0])
+            tf_frames = Video.transform_frames(self.frames['orig'], 
+                                               [trans[0]])
             for tf in trans[1:]:
-                tf_frames = transform_frames(tf_frames, tf)
-            self.frames[str(trans)] = tf_frames
+                tf_frames = Video.transform_frames(tf_frames, [tf])
+            self.frames[str(trans if len(trans) > 1 else trans[0])] = tf_frames
 
+    @staticmethod
     def transform_frames(frames, transforms):
-        ''' Alters all images in the list frames according the the transforms.
+        ''' Alters all images in the list frames according the the
+        transforms.
         '''
+        print transforms
         new_frames = copy.deepcopy(frames)
         for f in new_frames:
             for tf in transforms:
                 if tf[0] == 'crop':
-                    f.image = cv2.crop(f.image, tf[1])
+                    x,y,w,h = tf[1]
+                    f.image = f.image[int(x):int(x+w), int(y):int(y+h)]
                 if tf[0] == 'rotate':
                     angle = tf[1]
-                    image_center = tuple(np.array(f.image.shape)/2)
-                    rot_mat = cv2.getRotationMatrix2D(image_center,angle,1.0)
-                    f.image = cv2.warpAffine(fimage, rot_mat, f.image.shape, flags=cv2.INTER_LINEAR)
+                    im_shape = (f.image.shape[1], f.image.shape[0])
+                    image_center = tuple(np.array(im_shape)/2)
+                    rot_mat = cv2.getRotationMatrix2D(image_center,angle,1)
+                    f.image = cv2.warpAffine(f.image, rot_mat, im_shape, flags=cv2.INTER_LINEAR)
                 if tf[0] == 'flip_v':
                     f.image = cv2.flip(f.image, 1)
+        return new_frames
         
     def write_frames(self, write_dir, frames_key):
-        if not self.frames[frames_key]:
-            return 'Please create frames with type {}'.format(frames_key)
-        for frame in self.frames[frames_key]:
+        if frames_key not in self.frames.keys():
+            print 'Please create frames with type {}'.format(frames_key)
+            return
+
+        print 'Writing frames of type {}'.format(frames_key)
+        for count,frame in enumerate(self.frames[frames_key]):
             cv2.imwrite(os.path.join(write_dir, 
-                                     'frame_{}.jpg'.format(count)), 
+                                     'frame_{}_{}.jpg'.format(frames_key,count)), 
                         frame.image)
+        
 
     def extract_frame_features(self, feature, frames_key, mean_pool_length=0):
         frame_feats = [copy.deepcopy(x.extract_feature(feature)) for x in self.frames[frames_key]]
