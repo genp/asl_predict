@@ -32,8 +32,7 @@ else:
     vid_feats = {}
     for fname in os.listdir(vid_dir):
         v = Video(os.path.join(vid_dir,fname))
-        # TODO change to cropping and syntesizing new positives
-        croptf
+        croptf = ('crop', [v.w/4, v.h/4, v.w/2, v.h/2])
         alltf = str([croptf, ('flip_v', True)])
         v.get_frames(croptf, ('flip_v', True))
         pool_feats = v.extract_frame_features(feature, str(croptf),mean_pool_length=5)
@@ -42,7 +41,9 @@ else:
         pool_feats = v.extract_frame_features(feature, alltf,mean_pool_length=5)
         vid_feats[alltf].append(flatten(pool_feats))
         print 'Last feature shape {}'.format(vid_feats[alltf][-1].shape)
-
+    # Print some example frames
+    write_dir = 'data/frames'
+    v.write_frames(write_dir, alltf)
     # Save all features
     vid_feats_dict = {}
     for key in vid_feats.keys():
