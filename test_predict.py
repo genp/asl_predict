@@ -29,17 +29,24 @@ else:
 
     # Load all features
     vid_dir = 'data/videos/mp4'
-    vid_feats = []
+    vid_feats = {}
     for fname in os.listdir(vid_dir):
         v = Video(os.path.join(vid_dir,fname))
         # TODO change to cropping and syntesizing new positives
-        v.get_frames()
-        pool_feats = v.extract_frame_features(feature, mean_pool_length=5)
-        vid_feats.append(flatten(pool_feats))
-        print 'Last feature shape {}'.format(vid_feats[-1].shape)
+        croptf
+        alltf = str([croptf, ('flip_v', True)])
+        v.get_frames(croptf, ('flip_v', True))
+        pool_feats = v.extract_frame_features(feature, str(croptf),mean_pool_length=5)
+        vid_feats[str(croptf)].append(flatten(pool_feats))
+        print 'Last feature shape {}'.format(vid_feats[str(croptf)][-1].shape)
+        pool_feats = v.extract_frame_features(feature, alltf,mean_pool_length=5)
+        vid_feats[alltf].append(flatten(pool_feats))
+        print 'Last feature shape {}'.format(vid_feats[alltf][-1].shape)
 
     # Save all features
-    vid_feats_dict = dict(zip(os.listdir(vid_dir), vid_feats))
+    vid_feats_dict = {}
+    for key in vid_feats.keys():
+        vid_feats_dict[key] = dict(zip(os.listdir(vid_dir), vid_feats[key]))
     joblib.dump(vid_feats_dict, vid_feats_file, compress=6)
 
 # Read in labels
@@ -119,7 +126,8 @@ student_attrs, student_Y = zip(*sorted(student_lbls.items(), key=lambda s: s[0].
 student_Y = np.array(student_Y)
 student_feats = []
 for attr in student_attrs:
-    student_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
+    for key in vid_feats_dict.keys():
+        student_feats.append(vid_feats_dict[key][attr.replace(' ', '_')+'.mp4'][slice])
 student_feats = reduce(np.array(student_feats), ['power_norm'], alpha=1)
 student_Y = reduce(student_Y, ['normalize'])#np.divide(student_Y, np.max(student_Y))
 print 'Student dataset: Y {} X {}'.format(student_Y.shape, student_feats.shape)
@@ -128,7 +136,8 @@ exp_attrs, exp_Y = zip(*sorted(exp_lbls.items(), key=lambda s: s[0].lower()))
 exp_Y = np.array(exp_Y)
 exp_feats = []
 for attr in exp_attrs:
-    exp_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
+    for key in vid_feats_dict.keys():
+        exp_feats.append(vid_feats_dict[key][attr.replace(' ', '_')+'.mp4'][slice])
 exp_feats = reduce(np.array(exp_feats), ['power_norm'], alpha=1)#np.array(exp_feats)
 exp_Y = reduce(exp_Y, ['normalize'])#np.divide(exp_Y, np.max(exp_Y))
 print 'Exp dataset: Y {} X {}'.format(exp_Y.shape, exp_feats.shape)
