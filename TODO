@@ -1,5 +1,8 @@
+
 - synthesize positives
-- print some annecdotal predictions for qualitative comparison -- still not sure if predictions are junk
+    - current output is junk because features are almost all the same
+- try cropping out center of frame and only using the hand area
+- print some annecdotal predictions for qualitative comparison 
 - load sequence to sequence model
 - train classifier on lstm
 

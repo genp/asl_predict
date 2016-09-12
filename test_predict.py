@@ -8,7 +8,7 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import binarize
 from sklearn.metrics import average_precision_score, accuracy_score
 
-vid_feats_file = 'data/features/vgg_meanpool_5_flat.jbl'
+vid_feats_file = 'data/features/vgg_meanpool_5_flat_crop_center.jbl'
 if os.path.exists(vid_feats_file):
     vid_feats_dict = joblib.load(vid_feats_file)
 
@@ -32,6 +32,7 @@ else:
     vid_feats = []
     for fname in os.listdir(vid_dir):
         v = Video(os.path.join(vid_dir,fname))
+        # TODO change to cropping and syntesizing new positives
         v.get_frames()
         pool_feats = v.extract_frame_features(feature, mean_pool_length=5)
         vid_feats.append(flatten(pool_feats))
@@ -66,7 +67,7 @@ read_lbls(student_file, student_lbls)
 read_lbls(exp_file, exp_lbls)    
 
 
-def reduce(codes, ops, output_dim=100):
+def reduce(codes, ops, output_dim=100, alpha = 2.5):
     '''
     "codes" should be a numpy array of codes for either a single or multiple images of shape:
     (N, c) where "N" is the number of images and "c" is the length of codes.  
@@ -95,8 +96,7 @@ def reduce(codes, ops, output_dim=100):
             norm = np.divide((output_codes - mean[:, np.newaxis]),std[:, np.newaxis])
             output_codes = norm
 
-        elif op == "power_norm":
-            alpha = 2.5
+        elif op == "power_norm":            
             pownorm = lambda x: np.power(np.abs(x), alpha)
             pw = pownorm(output_codes)
             norm = np.linalg.norm(pw, axis=1)
@@ -120,7 +120,7 @@ student_Y = np.array(student_Y)
 student_feats = []
 for attr in student_attrs:
     student_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
-student_feats = reduce(np.array(student_feats), ['normalize', 'power_norm'])
+student_feats = reduce(np.array(student_feats), ['power_norm'], alpha=1)
 student_Y = reduce(student_Y, ['normalize'])#np.divide(student_Y, np.max(student_Y))
 print 'Student dataset: Y {} X {}'.format(student_Y.shape, student_feats.shape)
 
@@ -129,7 +129,7 @@ exp_Y = np.array(exp_Y)
 exp_feats = []
 for attr in exp_attrs:
     exp_feats.append(vid_feats_dict[attr.replace(' ', '_')+'.mp4'][slice])
-exp_feats = reduce(np.array(exp_feats), ['normalize', 'power_norm'])#np.array(exp_feats)
+exp_feats = reduce(np.array(exp_feats), ['power_norm'], alpha=1)#np.array(exp_feats)
 exp_Y = reduce(exp_Y, ['normalize'])#np.divide(exp_Y, np.max(exp_Y))
 print 'Exp dataset: Y {} X {}'.format(exp_Y.shape, exp_feats.shape)
 

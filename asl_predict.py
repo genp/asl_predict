@@ -18,7 +18,7 @@ class Video():
         self.h = self.vidcap.get(cv2.cv.CV_CAP_PROP_FRAME_HEIGHT)
         self.fps = round(self.vidcap.get(cv2.cv.CV_CAP_PROP_FPS))
         self.num_frames = self.vidcap.get(cv2.cv.CV_CAP_PROP_FRAME_COUNT)
-        self.frames = []
+        self.frames = {}
         print self
         
     def __repr__(self):
@@ -28,34 +28,73 @@ class Video():
                                           self.w, self.h, 
                                           self.fps, self.num_frames)
 
-    def get_frames(self):
-        if self.frames:
+    def get_frames(self, *args):
+        ''' Updates Video object member dictionary self.frames with a
+        list of the original frames, and the frames transformed as
+        defined by args.
+        Ex: self.get_frames(('crop', [x, y, w, h]), ('rotate',
+        degrees), ('flip_v', True)) will update self.frames with dict
+        items containing the original list of frames, those frames
+        cropped as defined, the cropped frames rotated by degrees, and
+        the cropped and rotated frames flipped horizontally.
+        '''
+        
+        synth_meta = [str(args[:ind]) for ind in range(len(args))]
+        print 'Creating frames with these transfomations {}'.format(synth_meta)
+        if all([sm in self.frames.keys() for sm in synth_meta]):
             return self.frames
 
-        self.vidcap.set(cv2.cv.CV_CAP_PROP_POS_MSEC, 0.0)
-        count = 0
-        success = 1
-        while success:
-          success,image = self.vidcap.read()
-          if not success:
-              break
-          self.frames.append(Frame(image))
-          count += 1
-          if count % 5 == 0:
-              print 'Read {} of {} frames'.format(count, 
-                                                  self.num_frames)
-        print 'Done reading {} frames'.format(self.num_frames)
+        if 'orig' not in self.frames.keys():
+            self.vidcap.set(cv2.cv.CV_CAP_PROP_POS_MSEC, 0.0)
+            orig_frames = []
+            count = 0
+            success = 1
+            while success:
+              success,image = self.vidcap.read()
+              if not success:
+                  break
+              orig_frams.append(Frame(image))
+              count += 1
+              if count % 5 == 0:
+                  print 'Read {} of {} frames'.format(count, 
+                                                      self.num_frames)
+            print 'Done reading {} frames'.format(self.num_frames)
+
+        for ind in range(len(args)):
+            trans = args[:ind]
+            if str(trans) in self.frames.keys():
+                continue
+            tf_frames = transform_frames(self.frames['orig'], trans[0])
+            for tf in trans[1:]:
+                tf_frames = transform_frames(tf_frames, tf)
+            self.frames[str(trans)] = tf_frames
+
+    def transform_frames(frames, transforms):
+        ''' Alters all images in the list frames according the the transforms.
+        '''
+        new_frames = copy.deepcopy(frames)
+        for f in new_frames:
+            for tf in transforms:
+                if tf[0] == 'crop':
+                    f.image = cv2.crop(f.image, tf[1])
+                if tf[0] == 'rotate':
+                    angle = tf[1]
+                    image_center = tuple(np.array(f.image.shape)/2)
+                    rot_mat = cv2.getRotationMatrix2D(image_center,angle,1.0)
+                    f.image = cv2.warpAffine(fimage, rot_mat, f.image.shape, flags=cv2.INTER_LINEAR)
+                if tf[0] == 'flip_v':
+                    f.image = cv2.flip(f.image, 1)
         
-    def write_frames(self, write_dir):
-        if not self.frames:
-            self.get_frames()
-        for frame in self.frames:
+    def write_frames(self, write_dir, frames_key):
+        if not self.frames[frames_key]:
+            return 'Please create frames with type {}'.format(frames_key)
+        for frame in self.frames[frames_key]:
             cv2.imwrite(os.path.join(write_dir, 
                                      'frame_{}.jpg'.format(count)), 
                         frame.image)
 
-    def extract_frame_features(self, feature, mean_pool_length=0):
-        frame_feats = [copy.deepcopy(x.extract_feature(feature)) for x in self.frames]
+    def extract_frame_features(self, feature, frames_key, mean_pool_length=0):
+        frame_feats = [copy.deepcopy(x.extract_feature(feature)) for x in self.frames[frames_key]]
         if mean_pool_length > 0:
             frame_feats = mean_pool(frame_feats, mean_pool_length)
         return frame_feats
