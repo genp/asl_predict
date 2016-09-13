@@ -8,15 +8,21 @@ from sklearn.svm import SVC
 from sklearn.preprocessing import binarize
 from sklearn.metrics import average_precision_score, accuracy_score
 
-vid_feats_file = 'data/features/vgg_meanpool_5_flat_crop_center.jbl'
+vid_feats_file = 'data/features/miohands_meanpool_10_flat_crop_center_rotate_5_flip_v.jbl'
 if os.path.exists(vid_feats_file):
     vid_feats_dict = joblib.load(vid_feats_file)
 
 else:
     feature = CNN()
-    feature.set_params(model_def='/Users/gen/kaizen/caffemodels/VGG/train.prototxt', 
-                       model_weights='/Users/gen/kaizen/caffemodels/VGG/weights.caffemodel', 
-                       layer_name='fc7')
+    #DeepHands
+    feature.set_params(model_def='models/1miohands-modelzoo-v2/test.prototxt', 
+                       model_weights='models/1miohands-modelzoo-v2/1miohands-v2.caffemodel',
+                       layer_name='loss3/SLclassifier')
+    #VGG
+    # feature.set_params(model_def='/Users/gen/kaizen/caffemodels/VGG/train.prototxt', 
+    #                    model_weights='/Users/gen/kaizen/caffemodels/VGG/weights.caffemodel', 
+    #                    layer_name='fc7')
+
     # frame_feats = v.extract_frame_features(feature)
     # pool_feats = v.extract_frame_features(feature, mean_pool_length=10)
     # flat_feat = flatten(pool_feats)
@@ -28,6 +34,7 @@ else:
     #                    layer_name='lstm2')
 
     # Load all features
+    pool_length = 10
     vid_dir = 'data/videos/mp4'
     vid_feats = {}
     for fname in os.listdir(vid_dir):
@@ -42,11 +49,15 @@ else:
             write_dir = 'data/frames'
             v.write_frames(write_dir, str(croptf))
             v.write_frames(write_dir, alltf)
-        sys.exit()
-        pool_feats = v.extract_frame_features(feature, str(croptf),mean_pool_length=5)
+
+        pool_feats = v.extract_frame_features(feature, str(croptf),mean_pool_length=pool_length)
+        if str(croptf) not in vid_feats.keys():
+            vid_feats[str(croptf)] = []
         vid_feats[str(croptf)].append(flatten(pool_feats))
         print 'Last feature shape {}'.format(vid_feats[str(croptf)][-1].shape)
-        pool_feats = v.extract_frame_features(feature, alltf,mean_pool_length=5)
+        pool_feats = v.extract_frame_features(feature, alltf,mean_pool_length=pool_length)
+        if alltf not in vid_feats.keys():
+            vid_feats[alltf] = []
         vid_feats[alltf].append(flatten(pool_feats))
         print 'Last feature shape {}'.format(vid_feats[alltf][-1].shape)
 
@@ -59,13 +70,14 @@ else:
 # Read in labels
 student_file = 'data/datamatrixFull.tsv'
 student_lbls = {}
-
+student_cats = []
 exp_file = 'data/expertQueries.txt'
 exp_lbls = {}
+exp_cats = []
 
 def read_lbls(fname, lbls):
     with open(fname, 'r') as f:
-        _ = f.readline()
+        headers = f.readline().split('\t')[2:]
         for row in f:
             items = row.split('\t')
             if items[0] not in lbls.keys():
@@ -75,10 +87,11 @@ def read_lbls(fname, lbls):
             except:
                 print 'Error reading this line: '
                 print items
-                return
+                return   
+        return headers
 
-read_lbls(student_file, student_lbls)    
-read_lbls(exp_file, exp_lbls)    
+student_cats = read_lbls(student_file, student_lbls)    
+exp_cats = read_lbls(exp_file, exp_lbls)    
 
 
 def reduce(codes, ops, output_dim=100, alpha = 2.5):
@@ -125,32 +138,41 @@ def reduce(codes, ops, output_dim=100, alpha = 2.5):
     return output_codes
 
 slice = []
-odim = 4096
-rdim = 200
-for c in range(5):
+odim = vid_feats[alltf][-1].shape[0]
+rdim = odim
+for c in range(10):
     slice = slice + range(c*odim,c*odim+rdim)
-student_attrs, student_Y = zip(*sorted(student_lbls.items(), key=lambda s: s[0].lower()))
-student_Y = np.array(student_Y)
+student_attrs, student_Y_all = zip(*sorted(student_lbls.items(), key=lambda s: s[0].lower()))
+inst_names = {}
+inst_names['student'] = []
+student_Y = []
 student_feats = []
-for attr in student_attrs:
+for idx, attr in enumerate(student_attrs):
     for key in vid_feats_dict.keys():
+        inst_names['student'].append(attr)
         student_feats.append(vid_feats_dict[key][attr.replace(' ', '_')+'.mp4'][slice])
+        student_Y.append(student_Y_all[idx])
+student_Y = np.array(student_Y)
 student_feats = reduce(np.array(student_feats), ['power_norm'], alpha=1)
 student_Y = reduce(student_Y, ['normalize'])#np.divide(student_Y, np.max(student_Y))
 print 'Student dataset: Y {} X {}'.format(student_Y.shape, student_feats.shape)
 
-exp_attrs, exp_Y = zip(*sorted(exp_lbls.items(), key=lambda s: s[0].lower()))
-exp_Y = np.array(exp_Y)
+exp_attrs, exp_Y_all = zip(*sorted(exp_lbls.items(), key=lambda s: s[0].lower()))
+exp_Y = []
 exp_feats = []
-for attr in exp_attrs:
+inst_names['exp'] = []
+for idx, attr in enumerate(exp_attrs):
     for key in vid_feats_dict.keys():
+        inst_names['exp'].append(attr)
         exp_feats.append(vid_feats_dict[key][attr.replace(' ', '_')+'.mp4'][slice])
+        exp_Y.append(exp_Y_all[idx])
+exp_Y = np.array(exp_Y)
 exp_feats = reduce(np.array(exp_feats), ['power_norm'], alpha=1)#np.array(exp_feats)
 exp_Y = reduce(exp_Y, ['normalize'])#np.divide(exp_Y, np.max(exp_Y))
 print 'Exp dataset: Y {} X {}'.format(exp_Y.shape, exp_feats.shape)
 
 # Fit train - 1vs.Rest of concattenated mean pooled features
-num_train = 60
+num_train = 70
 binary_thresh = 0.2
 X = np.array(student_feats[:num_train])
 Y = binarize(student_Y[:num_train, :], threshold=binary_thresh)
@@ -179,7 +201,9 @@ chance = np.mean(np.divide(np.sum(Yt,axis=0),Yt.shape[1]))
 print 'Student Test: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
                                                           np.mean([s for s in ap if not np.isnan(s)]),
                                                           chance)
-
+print '*** Predicted Labels ***'
+for idx, pred in enumerate(p):
+    print '{} : {}'.format(inst_names['student'][num_train+idx], [student_cats[jdx] for jdx in range(len(student_cats)) if pred[jdx]])
 
 # Fit train - 1vs.Rest of concattenated mean pooled features
 X = np.array(exp_feats[:num_train])
@@ -207,3 +231,6 @@ chance = np.mean(np.divide(np.sum(Yt,axis=0),Yt.shape[1]))
 print 'Exp Test: Accuracy {} AP {} chance {}'.format(np.mean(scores), 
                                                           np.mean([s for s in ap if not np.isnan(s)]),
                                                           chance)
+print '*** Predicted Labels ***'
+for idx, pred in enumerate(p):
+    print '{} : {}'.format(inst_names['student'][num_train+idx], [exp_cats[jdx] for jdx in range(len(exp_cats)) if pred[jdx]])
